@@ -1,0 +1,145 @@
+<html>
+  <head>
+    <title>Set Geolocation of Router</title>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="http://code.jquery.com/mobile/1.4.5/jquery.mobile-1.4.5.min.css" />
+    <script src="http://code.jquery.com/jquery-1.11.1.min.js"></script>
+    <script src="http://code.jquery.com/mobile/1.4.5/jquery.mobile-1.4.5.min.js"></script>
+
+    <script src="sha512.js" charset="utf-8"></script>
+    <script type="text/javascript">
+
+        function http(method, url, data) {
+          // This is the client-side script.
+          data = data || null;
+
+          // Initialize the Ajax request.
+          var xhr = new XMLHttpRequest();
+          xhr.open(method, url);
+          if (data)
+            xhr.setRequestHeader("Content-length", data.length);
+
+          var promise = {
+            chain : [],
+            errorChain: [],
+            execChain: function (event, arg) {
+              var chain = null;
+              if (event == 'OK') {
+                chain = promise.chain;
+              } else {
+                chain = promise.errorChain;
+              }
+
+              for (var c in chain) {
+                var element = chain[c];
+                arg = element(arg);
+              }
+            },
+            then: function (task) {
+              promise.chain.push(task);
+              return promise;
+            },
+            catch: function (handler) {
+              promise.errorChain.push(handler);
+              return promise;
+            }
+          };
+
+          // Track the state changes of the request.
+          xhr.onreadystatechange = function () {
+              var DONE = 4; // readyState 4 means the request is done.
+              var OK = 200; // status 200 is a successful return.
+              if (xhr.readyState === DONE) {
+                  if (xhr.status === OK) {
+                      promise.execChain('OK', xhr.responseText); // 'This is the returned text.'
+                  } else {
+                      promise.execChain('ERROR', xhr.status); // An error occurred during the request.
+                  }
+              }
+          };
+
+          // Send the request to send-ajax-data.php
+          xhr.send(data);
+
+          return promise;
+        }
+
+        var salt = null;
+
+        function geo(callback) {
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(callback);
+          } else {
+            alert("Geolocation is not supported by this browser.");
+          }
+        }
+
+        function getSalt() {
+          http('get', '/salt.txt')
+            .then(function (s) {
+              salt = s;
+              document.getElementById('salt').textContent = s;
+            })
+            .catch(function (code) {
+              if (code == 404) {
+                // the lua script should generate the salt.txt on first submit,
+                // when it does not exist yet.
+                submitIt()
+                  .then(function (result) {
+                    // --> maybe this could result in an endless loop
+                    // this could be an indicator that the location.lua could
+                    // not create a salt.txt
+                    getSalt();
+                  });
+              }
+            });
+        }
+
+        getSalt();
+
+        function geoIt() {
+          geo(function (position) {
+            document.getElementById('lat').value = position.coords.latitude;
+            document.getElementById('lon').value = position.coords.longitude;
+          });
+        }
+
+        function submitIt() {
+          var lat = document.getElementById('lat').value;
+          var lon = document.getElementById('lon').value;
+          var password = document.getElementById('password').value;
+
+          var hash = sha512(lat + lon + password + salt);
+          var data = lat + ',' + lon + ',' + hash;
+
+          return http('post', 'cgi-bin/set_location', data)
+            .then(function (res) {
+              res = res.replace('\n', '<br>');
+              document.getElementById('result').innerHTML = res;
+              getSalt();
+            })
+        }
+    </script>
+  </head>
+  <body>
+    <div data-role="page" id="pageone">
+      <div data-role="header">
+        <h1>Set Geolocation of Router</h1>
+      </div>
+      <div data-role="main" class="ui-content">
+        <form action="set_location.html" method="GET" onsubmit="submitIt(); return false;">
+          Salt: <span id="salt"></span> <br />
+          Password: <input id="password" type="password" /> <br />
+          Lat: <input id="lat" type="text" /> <br />
+          Lon: <input id="lon" type="text" /> <br />
+          <button href="#" onclick="return geoIt();">Geo!</button>
+          <input type="submit" value="Submit" />
+        </form>
+
+        <h4>Result</h4>
+        <p id="result"></p>
+      </div>
+    </div>
+  </body>
+</html>
